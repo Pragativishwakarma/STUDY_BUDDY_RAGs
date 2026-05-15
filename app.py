@@ -35,6 +35,8 @@ st.markdown("""
     height: 3em;
     font-size: 16px;
     font-weight: bold;
+    background-color: #4CAF50;
+    color: white;
 }
 
 .stTextInput input {
@@ -47,6 +49,7 @@ st.markdown("""
     border-radius: 12px;
     color: white;
     margin-top: 20px;
+    border: 1px solid #444;
 }
 
 .context-box {
@@ -54,6 +57,8 @@ st.markdown("""
     padding: 15px;
     border-radius: 10px;
     color: white;
+    margin-bottom: 10px;
+    border: 1px solid #444;
 }
 
 </style>
@@ -64,23 +69,65 @@ st.markdown("""
 st.title("📚 Study Buddy RAG with Gemini")
 st.caption("Upload PDF → Ask Questions → Get AI Answers")
 
-# ---------------- GEMINI API ----------------
+# ---------------- GEMINI API CONFIG ----------------
 
 try:
 
-    genai.configure(
-        api_key=st.secrets["GEMINI_API_KEY"]
-    )
+    # SAFE SECRET ACCESS
+    api_key = st.secrets.get("GOOGLE_API_KEY")
 
-    st.sidebar.success("✅ Gemini API Connected")
+    if not api_key:
+        st.error("❌ Gemini API Key not found in Streamlit Secrets")
+
+        st.code("""
+GOOGLE_API_KEY = "your_api_key_here"
+""")
+
+        st.info("""
+📌 Add this inside Streamlit Cloud:
+
+Settings → Secrets
+""")
+
+        st.stop()
+
+    # CONFIGURE GEMINI
+    genai.configure(api_key=api_key)
+
+    # TEST CONNECTION
+    try:
+        test_model = genai.GenerativeModel(
+            "gemini-1.5-flash"
+        )
+
+        test_response = test_model.generate_content(
+            "Hello"
+        )
+
+        if test_response:
+            st.sidebar.success("✅ Gemini API Connected")
+
+    except Exception as gemini_error:
+
+        st.error(f"""
+❌ Gemini API Error:
+
+{gemini_error}
+""")
+
+        st.info("""
+Possible reasons:
+- Invalid API Key
+- Expired API Key
+- Billing/Quota issue
+- Wrong Gemini model
+""")
+
+        st.stop()
 
 except Exception as e:
 
-    st.error("❌ Gemini API Key not found")
-
-    st.code("""
-GEMINI_API_KEY="your_api_key_here"
-""")
+    st.error(f"❌ API Setup Error: {e}")
 
     st.stop()
 
@@ -111,7 +158,7 @@ top_k = st.sidebar.slider(
     value=4
 )
 
-# ---------------- MODEL CACHE ----------------
+# ---------------- EMBEDDING MODEL CACHE ----------------
 
 @st.cache_resource
 def load_embedding_model():
@@ -120,7 +167,24 @@ def load_embedding_model():
         "all-MiniLM-L6-v2"
     )
 
-embedding_model = load_embedding_model()
+# ---------------- LOAD MODEL ----------------
+
+try:
+
+    with st.spinner("🔄 Loading embedding model..."):
+
+        embedding_model = load_embedding_model()
+
+except Exception as e:
+
+    st.error(f"""
+❌ Failed to load embedding model.
+
+Error:
+{e}
+""")
+
+    st.stop()
 
 # ---------------- FILE UPLOAD ----------------
 
@@ -129,7 +193,7 @@ uploaded_file = st.file_uploader(
     type="pdf"
 )
 
-# ---------------- CHUNK FUNCTION ----------------
+# ---------------- TEXT CHUNK FUNCTION ----------------
 
 def chunk_text(text, chunk_size=500, overlap=50):
 
@@ -146,7 +210,8 @@ def chunk_text(text, chunk_size=500, overlap=50):
 
         chunk = text[start:end]
 
-        chunks.append(chunk)
+        if chunk.strip():
+            chunks.append(chunk)
 
         start += chunk_size - overlap
 
@@ -185,11 +250,15 @@ if uploaded_file:
 
             for page in reader.pages:
 
-                text = page.extract_text()
+                try:
 
-                if text:
+                    text = page.extract_text()
 
-                    full_text += text + "\n"
+                    if text:
+                        full_text += text + "\n"
+
+                except Exception:
+                    pass
 
             time.sleep(1)
 
@@ -211,13 +280,22 @@ if uploaded_file:
             overlap=chunk_overlap
         )
 
+        if len(texts) == 0:
+
+            st.error(
+                "❌ Failed to create text chunks"
+            )
+
+            st.stop()
+
         # ---------------- EMBEDDINGS ----------------
 
         with st.spinner("🧠 Creating embeddings..."):
 
             embeddings = embedding_model.encode(
                 texts,
-                show_progress_bar=True
+                convert_to_numpy=True,
+                show_progress_bar=False
             )
 
             embeddings = np.array(
@@ -246,11 +324,14 @@ if uploaded_file:
         # ---------------- SUCCESS ----------------
 
         st.success(
-            f"✅ PDF processed successfully! "
-            f"{len(texts)} chunks created."
+            f"""
+✅ PDF processed successfully!
+
+📄 Chunks Created: {len(texts)}
+"""
         )
 
-        # ---------------- QUESTION INPUT ----------------
+        # ---------------- QUESTION SECTION ----------------
 
         st.subheader("💬 Ask Questions")
 
@@ -270,14 +351,15 @@ if uploaded_file:
 
             else:
 
-                # ---------------- QUERY EMBEDDING ----------------
+                # ---------------- SEARCH CONTEXT ----------------
 
                 with st.spinner(
                     "🔍 Searching relevant context..."
                 ):
 
                     q_embedding = embedding_model.encode(
-                        [question]
+                        [question],
+                        convert_to_numpy=True
                     )
 
                     q_embedding = np.array(
@@ -287,15 +369,19 @@ if uploaded_file:
 
                     distances, indices = index.search(
                         q_embedding,
-                        k=top_k
+                        k=min(top_k, len(texts))
                     )
 
                 # ---------------- RETRIEVE CHUNKS ----------------
 
-                retrieved_chunks = [
-                    texts[i]
-                    for i in indices[0]
-                ]
+                retrieved_chunks = []
+
+                for i in indices[0]:
+
+                    if i < len(texts):
+                        retrieved_chunks.append(
+                            texts[i]
+                        )
 
                 context = "\n\n".join(
                     retrieved_chunks
@@ -324,7 +410,7 @@ reply exactly:
 ---------------- ANSWER ----------------
 """
 
-                # ---------------- GEMINI ----------------
+                # ---------------- GEMINI RESPONSE ----------------
 
                 try:
 
@@ -342,18 +428,22 @@ reply exactly:
 
                     # ---------------- SAFE RESPONSE ----------------
 
-                    if (
-                        response
-                        and hasattr(response, "text")
-                    ):
+                    answer = "No response generated."
 
-                        answer = response.text
+                    if response:
 
-                    else:
+                        if hasattr(response, "text"):
 
-                        answer = (
-                            "No response generated."
-                        )
+                            answer = response.text
+
+                        elif (
+                            hasattr(response, "candidates")
+                            and response.candidates
+                        ):
+
+                            answer = response.candidates[
+                                0
+                            ].content.parts[0].text
 
                     # ---------------- OUTPUT ----------------
 
@@ -412,15 +502,27 @@ reply exactly:
 
                 except Exception as e:
 
-                    st.error(
-                        f"❌ Gemini Error: {e}"
-                    )
+                    st.error(f"""
+❌ Gemini Error
+
+{e}
+""")
+
+                    st.info("""
+Fixes:
+- Check API Key
+- Use latest Gemini model
+- Verify internet connection
+- Verify billing/quota
+""")
 
     except Exception as e:
 
-        st.error(
-            f"❌ Error Processing PDF: {e}"
-        )
+        st.error(f"""
+❌ Error Processing PDF
+
+{e}
+""")
 
     finally:
 
