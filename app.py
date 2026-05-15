@@ -60,7 +60,7 @@ st.caption("Upload PDF → Ask Questions → Get AI Answers")
 # ---------------- GEMINI API ----------------
 
 try:
-    genai.configure(api_key=st.secrets["AIzaSyAVISWyH5g7Geg5D_Tf_uWrh03FrOixOy4"])
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
     st.sidebar.success("✅ Gemini API Connected")
 
