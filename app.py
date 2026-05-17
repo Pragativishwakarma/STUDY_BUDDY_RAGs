@@ -406,3 +406,6 @@ st.markdown("---")
 st.caption(
     "🚀 Built with Streamlit + Gemini + FAISS"
 )
+
+
+
