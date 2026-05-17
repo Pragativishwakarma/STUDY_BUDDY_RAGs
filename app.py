@@ -65,7 +65,7 @@ st.caption("Upload PDF → Ask Questions → AI Answers")
 # ---------------- API KEY ----------------
 
 # ✅ FIXED: Hardcoded API key + updated model name
-LOCAL_API_KEY = "AIzaSyBZKOnrMqsAg52RzTfth96Vwf4bcgAOkFg"
+LOCAL_API_KEY = "AIzaSyBTp6Xh8Ugmj3JXmBbh1fMq-YxXf89iVnQ"
 
 try:
 
