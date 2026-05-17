@@ -8,15 +8,9 @@ import os
 from pypdf import PdfReader
 import time
 
-# =========================================================
-# FIX TOKENIZER WARNING
-# =========================================================
+# ---------------- SETTINGS ----------------
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-# =========================================================
-# PAGE CONFIG
-# =========================================================
 
 st.set_page_config(
     page_title="Study Buddy RAG",
@@ -24,9 +18,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# =========================================================
-# CUSTOM CSS
-# =========================================================
+# ---------------- CUSTOM CSS ----------------
 
 st.markdown("""
 <style>
@@ -70,47 +62,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# =========================================================
-# TITLE
-# =========================================================
+# ---------------- TITLE ----------------
 
-st.title("📚 Study Buddy RAG with Gemini")
+st.title("📚 Study Buddy RAG")
 st.caption("Upload PDF → Ask Questions → Get AI Answers")
 
-# =========================================================
-# GEMINI API CONFIG
-# =========================================================
+# ---------------- GEMINI CONFIG ----------------
 
 try:
 
-    # Get API Key from Streamlit Secrets
+    # STREAMLIT SECRETS
     api_key = st.secrets["GOOGLE_API_KEY"]
 
-    # Configure Gemini
+    # CONFIGURE GEMINI
     genai.configure(api_key=api_key)
 
-    # Load Gemini Model
+    # LOAD MODEL
     llm = genai.GenerativeModel(
         model_name="gemini-1.5-flash"
     )
 
-    # Test API
-    test_response = llm.generate_content("Hello")
+    # TEST API
+    test = llm.generate_content("Hello")
 
-    if test_response:
+    if test:
         st.sidebar.success("✅ Gemini Connected")
-
-except KeyError:
-
-    st.error("""
-❌ GOOGLE_API_KEY not found.
-
-Add this inside Streamlit Secrets:
-
-GOOGLE_API_KEY = "your_api_key"
-""")
-
-    st.stop()
 
 except Exception as e:
 
@@ -121,18 +97,16 @@ except Exception as e:
 """)
 
     st.info("""
-Possible reasons:
-- Invalid API key
+Possible fixes:
+- Wrong API key
 - Billing issue
-- Wrong Gemini model
-- API quota exceeded
+- Expired key
+- Invalid Gemini model
 """)
 
     st.stop()
 
-# =========================================================
-# SIDEBAR SETTINGS
-# =========================================================
+# ---------------- SIDEBAR ----------------
 
 st.sidebar.header("⚙️ Settings")
 
@@ -153,15 +127,13 @@ chunk_overlap = st.sidebar.slider(
 )
 
 top_k = st.sidebar.slider(
-    "Top Chunks",
+    "Top Context Chunks",
     1,
     10,
     4
 )
 
-# =========================================================
-# LOAD EMBEDDING MODEL
-# =========================================================
+# ---------------- LOAD EMBEDDING MODEL ----------------
 
 @st.cache_resource
 def load_embedding_model():
@@ -178,32 +150,20 @@ try:
 
 except Exception as e:
 
-    st.error(f"""
-❌ Failed to load embedding model
-
-{e}
-""")
+    st.error(f"❌ Embedding Model Error\n\n{e}")
 
     st.stop()
 
-# =========================================================
-# FILE UPLOAD
-# =========================================================
+# ---------------- FILE UPLOADER ----------------
 
 uploaded_file = st.file_uploader(
     "📄 Upload PDF",
     type=["pdf"]
 )
 
-# =========================================================
-# CHUNKING FUNCTION
-# =========================================================
+# ---------------- CHUNK FUNCTION ----------------
 
-def chunk_text(
-    text,
-    chunk_size=500,
-    overlap=50
-):
+def chunk_text(text, chunk_size=500, overlap=50):
 
     chunks = []
 
@@ -211,10 +171,7 @@ def chunk_text(
 
     while start < len(text):
 
-        end = min(
-            start + chunk_size,
-            len(text)
-        )
+        end = start + chunk_size
 
         chunk = text[start:end]
 
@@ -225,24 +182,17 @@ def chunk_text(
 
     return chunks
 
-# =========================================================
-# MAIN APP
-# =========================================================
+# ---------------- MAIN APP ----------------
 
 if uploaded_file:
 
-    st.success(
-        f"✅ Uploaded: {uploaded_file.name}"
-    )
+    st.success(f"✅ Uploaded: {uploaded_file.name}")
 
     tmp_path = None
 
     try:
 
-        # =================================================
         # SAVE TEMP FILE
-        # =================================================
-
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".pdf"
@@ -252,11 +202,8 @@ if uploaded_file:
 
             tmp_path = tmp.name
 
-        # =================================================
         # EXTRACT PDF TEXT
-        # =================================================
-
-        with st.spinner("📖 Extracting PDF text..."):
+        with st.spinner("📖 Reading PDF..."):
 
             reader = PdfReader(tmp_path)
 
@@ -264,52 +211,27 @@ if uploaded_file:
 
             for page in reader.pages:
 
-                try:
+                text = page.extract_text()
 
-                    text = page.extract_text()
-
-                    if text:
-                        full_text += text + "\n"
-
-                except Exception:
-                    pass
-
-            time.sleep(1)
-
-        # =================================================
-        # EMPTY CHECK
-        # =================================================
+                if text:
+                    full_text += text + "\n"
 
         if not full_text.strip():
 
-            st.error(
-                "❌ No readable text found in PDF"
-            )
+            st.error("❌ No readable text found.")
 
             st.stop()
 
-        # =================================================
-        # CREATE CHUNKS
-        # =================================================
-
+        # CHUNKING
         texts = chunk_text(
             full_text,
             chunk_size,
             chunk_overlap
         )
 
-        if len(texts) == 0:
+        st.success(f"✅ Created {len(texts)} chunks")
 
-            st.error(
-                "❌ Failed to create chunks"
-            )
-
-            st.stop()
-
-        # =================================================
         # CREATE EMBEDDINGS
-        # =================================================
-
         with st.spinner("🧠 Creating embeddings..."):
 
             embeddings = embedding_model.encode(
@@ -323,83 +245,49 @@ if uploaded_file:
                 dtype=np.float32
             )
 
-        # =================================================
         # CREATE FAISS INDEX
-        # =================================================
+        dimension = embeddings.shape[1]
 
-        with st.spinner(
-            "⚡ Building vector database..."
-        ):
+        index = faiss.IndexFlatL2(dimension)
 
-            dimension = embeddings.shape[1]
+        index.add(embeddings)
 
-            index = faiss.IndexFlatL2(
-                dimension
-            )
-
-            index.add(embeddings)
-
-        # =================================================
-        # SUCCESS MESSAGE
-        # =================================================
-
-        st.success(f"""
-✅ PDF processed successfully!
-
-📄 Total Chunks: {len(texts)}
-""")
-
-        # =================================================
-        # QUESTION INPUT
-        # =================================================
+        # ---------------- QUESTION INPUT ----------------
 
         st.subheader("💬 Ask Questions")
 
         question = st.text_input(
-            "Enter your question"
+            "Ask anything from the PDF"
         )
-
-        # =================================================
-        # GENERATE ANSWER
-        # =================================================
 
         if st.button("🚀 Generate Answer"):
 
             if not question.strip():
 
-                st.warning(
-                    "⚠️ Please enter a question"
-                )
+                st.warning("⚠️ Enter a question")
 
             else:
 
-                # =============================================
-                # SEARCH RELEVANT CHUNKS
-                # =============================================
+                # QUESTION EMBEDDING
+                q_embedding = embedding_model.encode(
+                    [question],
+                    convert_to_numpy=True
+                )
 
-                with st.spinner(
-                    "🔍 Searching context..."
-                ):
+                q_embedding = np.array(
+                    q_embedding,
+                    dtype=np.float32
+                )
 
-                    q_embedding = embedding_model.encode(
-                        [question],
-                        convert_to_numpy=True
-                    )
-
-                    q_embedding = np.array(
-                        q_embedding,
-                        dtype=np.float32
-                    )
+                # SEARCH
+                with st.spinner("🔍 Searching PDF..."):
 
                     distances, indices = index.search(
                         q_embedding,
                         k=min(top_k, len(texts))
                     )
 
-                # =============================================
-                # RETRIEVE CHUNKS
-                # =============================================
-
+                # RETRIEVE CONTEXT
                 retrieved_chunks = []
 
                 for idx in indices[0]:
@@ -414,65 +302,36 @@ if uploaded_file:
                     retrieved_chunks
                 )
 
-                # =============================================
                 # PROMPT
-                # =============================================
-
                 prompt = f"""
-You are an intelligent AI Study Assistant.
+You are an AI Study Assistant.
 
 Answer ONLY from the provided context.
 
-If the answer is not present in the context,
-reply exactly:
-
+If answer is unavailable, say:
 "I could not find the answer in the uploaded PDF."
 
-================ CONTEXT ================
-
+CONTEXT:
 {context}
 
-================ QUESTION ================
-
+QUESTION:
 {question}
 
-================ ANSWER ================
+ANSWER:
 """
 
-                # =============================================
                 # GEMINI RESPONSE
-                # =============================================
-
                 try:
 
-                    with st.spinner(
-                        "🤖 Gemini is thinking..."
-                    ):
+                    with st.spinner("🤖 Gemini Thinking..."):
 
                         response = llm.generate_content(
                             prompt
                         )
 
-                    # =========================================
-                    # SAFE RESPONSE EXTRACTION
-                    # =========================================
+                    answer = response.text
 
-                    answer = "No response generated."
-
-                    try:
-
-                        if response.text:
-
-                            answer = response.text
-
-                    except Exception:
-
-                        pass
-
-                    # =========================================
-                    # DISPLAY ANSWER
-                    # =========================================
-
+                    # OUTPUT
                     st.subheader("📌 Answer")
 
                     st.markdown(f"""
@@ -483,21 +342,12 @@ reply exactly:
 </div>
 """, unsafe_allow_html=True)
 
-                    # =========================================
-                    # SHOW CONTEXT
-                    # =========================================
+                    # CONTEXT
+                    with st.expander("📚 Retrieved Context"):
 
-                    with st.expander(
-                        "📚 Retrieved Context"
-                    ):
+                        for i, chunk in enumerate(retrieved_chunks):
 
-                        for i, chunk in enumerate(
-                            retrieved_chunks
-                        ):
-
-                            st.markdown(
-                                f"### Chunk {i+1}"
-                            )
+                            st.markdown(f"### Chunk {i+1}")
 
                             st.markdown(f"""
 <div class="context-box">
@@ -507,25 +357,22 @@ reply exactly:
 </div>
 """, unsafe_allow_html=True)
 
-                    # =========================================
                     # STATS
-                    # =========================================
-
                     st.subheader("📊 Stats")
 
-                    col1, col2, col3 = st.columns(3)
+                    c1, c2, c3 = st.columns(3)
 
-                    col1.metric(
+                    c1.metric(
                         "Chunks",
                         len(texts)
                     )
 
-                    col2.metric(
+                    c2.metric(
                         "Top Matches",
                         top_k
                     )
 
-                    col3.metric(
+                    c3.metric(
                         "Characters",
                         len(full_text)
                     )
@@ -541,30 +388,21 @@ reply exactly:
     except Exception as e:
 
         st.error(f"""
-❌ Error Processing PDF
+❌ PDF Processing Error
 
 {e}
 """)
 
     finally:
 
-        # =================================================
-        # DELETE TEMP FILE
-        # =================================================
-
-        if (
-            tmp_path
-            and os.path.exists(tmp_path)
-        ):
+        if tmp_path and os.path.exists(tmp_path):
 
             os.unlink(tmp_path)
 
-# =========================================================
-# FOOTER
-# =========================================================
+# ---------------- FOOTER ----------------
 
 st.markdown("---")
 
 st.caption(
-    "🚀 Built with Streamlit + Gemini + FAISS + SentenceTransformers"
+    "🚀 Built with Streamlit + Gemini + FAISS"
 )
