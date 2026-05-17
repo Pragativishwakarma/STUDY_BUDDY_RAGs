@@ -6,7 +6,6 @@ import numpy as np
 import tempfile
 import os
 from pypdf import PdfReader
-import time
 
 # ---------------- SETTINGS ----------------
 
@@ -18,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- CUSTOM CSS ----------------
+# ---------------- PAGE STYLE ----------------
 
 st.markdown("""
 <style>
@@ -29,16 +28,12 @@ st.markdown("""
 
 .stButton button {
     width: 100%;
-    border-radius: 12px;
+    border-radius: 10px;
     height: 3em;
     font-size: 16px;
     font-weight: bold;
     background-color: #4CAF50;
     color: white;
-}
-
-.stTextInput input {
-    border-radius: 10px;
 }
 
 .answer-box {
@@ -65,28 +60,43 @@ st.markdown("""
 # ---------------- TITLE ----------------
 
 st.title("📚 Study Buddy RAG")
-st.caption("Upload PDF → Ask Questions → Get AI Answers")
+st.caption("Upload PDF → Ask Questions → AI Answers")
 
-# ---------------- GEMINI CONFIG ----------------
+# ---------------- API KEY ----------------
+
+# FOR LOCAL TESTING ONLY
+LOCAL_API_KEY = ""
 
 try:
 
-    # STREAMLIT SECRETS
-    api_key = st.secrets["GOOGLE_API_KEY"]
+    # USE STREAMLIT SECRET IF AVAILABLE
+    api_key = st.secrets.get(
+        "GOOGLE_API_KEY",
+        LOCAL_API_KEY
+    )
+
+    if not api_key:
+
+        st.error("❌ API Key Missing")
+
+        st.code("""
+GOOGLE_API_KEY = "your_key_here"
+""")
+
+        st.stop()
 
     # CONFIGURE GEMINI
     genai.configure(api_key=api_key)
 
     # LOAD MODEL
     llm = genai.GenerativeModel(
-      model_name="gemini-2.0-flash"
+        model_name="gemini-1.5-flash"
     )
 
-    # TEST API
-    test = llm.generate_content("Hello")
+    # TEST CONNECTION
+    llm.generate_content("hello")
 
-    if test:
-        st.sidebar.success("✅ Gemini Connected")
+    st.sidebar.success("✅ Gemini Connected")
 
 except Exception as e:
 
@@ -97,11 +107,11 @@ except Exception as e:
 """)
 
     st.info("""
-Possible fixes:
-- Wrong API key
-- Billing issue
-- Expired key
-- Invalid Gemini model
+Possible Fixes:
+- Invalid API key
+- Free quota exceeded
+- Billing disabled
+- Wrong model
 """)
 
     st.stop()
@@ -127,13 +137,13 @@ chunk_overlap = st.sidebar.slider(
 )
 
 top_k = st.sidebar.slider(
-    "Top Context Chunks",
+    "Top Chunks",
     1,
     10,
     4
 )
 
-# ---------------- LOAD EMBEDDING MODEL ----------------
+# ---------------- EMBEDDING MODEL ----------------
 
 @st.cache_resource
 def load_embedding_model():
@@ -142,19 +152,11 @@ def load_embedding_model():
         "all-MiniLM-L6-v2"
     )
 
-try:
+with st.spinner("🔄 Loading embedding model..."):
 
-    with st.spinner("🔄 Loading embedding model..."):
+    embedding_model = load_embedding_model()
 
-        embedding_model = load_embedding_model()
-
-except Exception as e:
-
-    st.error(f"❌ Embedding Model Error\n\n{e}")
-
-    st.stop()
-
-# ---------------- FILE UPLOADER ----------------
+# ---------------- FILE UPLOAD ----------------
 
 uploaded_file = st.file_uploader(
     "📄 Upload PDF",
@@ -176,6 +178,7 @@ def chunk_text(text, chunk_size=500, overlap=50):
         chunk = text[start:end]
 
         if chunk.strip():
+
             chunks.append(chunk)
 
         start += chunk_size - overlap
@@ -188,7 +191,7 @@ if uploaded_file:
 
     st.success(f"✅ Uploaded: {uploaded_file.name}")
 
-    tmp_path = None
+    temp_path = None
 
     try:
 
@@ -196,16 +199,16 @@ if uploaded_file:
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".pdf"
-        ) as tmp:
+        ) as temp_file:
 
-            tmp.write(uploaded_file.read())
+            temp_file.write(uploaded_file.read())
 
-            tmp_path = tmp.name
+            temp_path = temp_file.name
 
-        # EXTRACT PDF TEXT
+        # READ PDF
         with st.spinner("📖 Reading PDF..."):
 
-            reader = PdfReader(tmp_path)
+            reader = PdfReader(temp_path)
 
             full_text = ""
 
@@ -214,22 +217,23 @@ if uploaded_file:
                 text = page.extract_text()
 
                 if text:
+
                     full_text += text + "\n"
 
         if not full_text.strip():
 
-            st.error("❌ No readable text found.")
+            st.error("❌ No readable text found")
 
             st.stop()
 
-        # CHUNKING
+        # CREATE CHUNKS
         texts = chunk_text(
             full_text,
             chunk_size,
             chunk_overlap
         )
 
-        st.success(f"✅ Created {len(texts)} chunks")
+        st.success(f"✅ {len(texts)} chunks created")
 
         # CREATE EMBEDDINGS
         with st.spinner("🧠 Creating embeddings..."):
@@ -245,30 +249,30 @@ if uploaded_file:
                 dtype=np.float32
             )
 
-        # CREATE FAISS INDEX
+        # BUILD FAISS INDEX
         dimension = embeddings.shape[1]
 
         index = faiss.IndexFlatL2(dimension)
 
         index.add(embeddings)
 
-        # ---------------- QUESTION INPUT ----------------
+        # ---------------- QUESTION ----------------
 
-        st.subheader("💬 Ask Questions")
+        st.subheader("💬 Ask Question")
 
         question = st.text_input(
-            "Ask anything from the PDF"
+            "Enter your question"
         )
 
         if st.button("🚀 Generate Answer"):
 
             if not question.strip():
 
-                st.warning("⚠️ Enter a question")
+                st.warning("⚠️ Please enter a question")
 
             else:
 
-                # QUESTION EMBEDDING
+                # EMBED QUESTION
                 q_embedding = embedding_model.encode(
                     [question],
                     convert_to_numpy=True
@@ -280,7 +284,7 @@ if uploaded_file:
                 )
 
                 # SEARCH
-                with st.spinner("🔍 Searching PDF..."):
+                with st.spinner("🔍 Searching..."):
 
                     distances, indices = index.search(
                         q_embedding,
@@ -304,9 +308,9 @@ if uploaded_file:
 
                 # PROMPT
                 prompt = f"""
-You are an AI Study Assistant.
+You are a Study Assistant AI.
 
-Answer ONLY from the provided context.
+Answer ONLY from the given PDF context.
 
 If answer is unavailable, say:
 "I could not find the answer in the uploaded PDF."
@@ -342,7 +346,7 @@ ANSWER:
 </div>
 """, unsafe_allow_html=True)
 
-                    # CONTEXT
+                    # CONTEXT VIEWER
                     with st.expander("📚 Retrieved Context"):
 
                         for i, chunk in enumerate(retrieved_chunks):
@@ -356,26 +360,6 @@ ANSWER:
 
 </div>
 """, unsafe_allow_html=True)
-
-                    # STATS
-                    st.subheader("📊 Stats")
-
-                    c1, c2, c3 = st.columns(3)
-
-                    c1.metric(
-                        "Chunks",
-                        len(texts)
-                    )
-
-                    c2.metric(
-                        "Top Matches",
-                        top_k
-                    )
-
-                    c3.metric(
-                        "Characters",
-                        len(full_text)
-                    )
 
                 except Exception as e:
 
@@ -395,9 +379,9 @@ ANSWER:
 
     finally:
 
-        if tmp_path and os.path.exists(tmp_path):
+        if temp_path and os.path.exists(temp_path):
 
-            os.unlink(tmp_path)
+            os.unlink(temp_path)
 
 # ---------------- FOOTER ----------------
 
@@ -406,6 +390,3 @@ st.markdown("---")
 st.caption(
     "🚀 Built with Streamlit + Gemini + FAISS"
 )
-
-
-
