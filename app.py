@@ -64,12 +64,12 @@ st.caption("Upload PDF → Ask Questions → AI Answers")
 
 # ---------------- API KEY ----------------
 
-# FOR LOCAL TESTING ONLY
-LOCAL_API_KEY = ""
+# ✅ FIXED: Hardcoded API key + updated model name
+LOCAL_API_KEY = "AIzaSyBZKOnrMqsAg52RzTfth96Vwf4bcgAOkFg"
 
 try:
 
-    # USE STREAMLIT SECRET IF AVAILABLE
+    # USE STREAMLIT SECRET IF AVAILABLE, ELSE USE LOCAL KEY
     api_key = st.secrets.get(
         "GOOGLE_API_KEY",
         LOCAL_API_KEY
@@ -88,9 +88,9 @@ GOOGLE_API_KEY = "your_key_here"
     # CONFIGURE GEMINI
     genai.configure(api_key=api_key)
 
-    # LOAD MODEL
+    # ✅ FIXED: Updated model from "gemini-1.5-flash" → "gemini-2.0-flash"
     llm = genai.GenerativeModel(
-        model_name="gemini-1.5-flash"
+        model_name="gemini-2.0-flash"
     )
 
     # TEST CONNECTION
