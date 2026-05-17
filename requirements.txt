@@ -1,5 +1,5 @@
 streamlit
-google-generativeai
+
 sentence-transformers
 faiss-cpu
 numpy
@@ -9,6 +9,6 @@ transformers
 scikit-learn
 torchvision
 
-google-generativeai>=0.8.3
-google-genai
+google-generativeai>=0.7.2
+
 
