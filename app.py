@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -62,46 +62,47 @@ st.markdown("""
 st.title("📚 Study Buddy RAG")
 st.caption("Upload PDF → Ask Questions → AI Answers")
 
-# ---------------- API KEY ----------------
+# ---------------- OPENAI API KEY ----------------
 
-# ✅ FIXED: Hardcoded API key + updated model name
-LOCAL_API_KEY = "AIzaSyBTp6Xh8Ugmj3JXmBbh1fMq-YxXf89iVnQ"
+# ✅ ADD YOUR OPENAI API KEY HERE
+LOCAL_API_KEY = "YOUR_OPENAI_API_KEY"
 
 try:
 
-    # USE STREAMLIT SECRET IF AVAILABLE, ELSE USE LOCAL KEY
+    # USE STREAMLIT SECRET IF AVAILABLE
     api_key = st.secrets.get(
-        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
         LOCAL_API_KEY
     )
 
     if not api_key:
 
-        st.error("❌ API Key Missing")
+        st.error("❌ OpenAI API Key Missing")
 
         st.code("""
-GOOGLE_API_KEY = "your_key_here"
+OPENAI_API_KEY = "your_key_here"
 """)
 
         st.stop()
 
-    # CONFIGURE GEMINI
-    genai.configure(api_key=api_key)
-
-    # ✅ FIXED: Updated model from "gemini-1.5-flash" → "gemini-2.0-flash"
-    llm = genai.GenerativeModel(
-        model_name="gemini-2.0-flash"
-    )
+    # OPENAI CLIENT
+    client = OpenAI(api_key=api_key)
 
     # TEST CONNECTION
-    llm.generate_content("hello")
+    client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "user", "content": "hello"}
+        ],
+        max_tokens=5
+    )
 
-    st.sidebar.success("✅ Gemini Connected")
+    st.sidebar.success("✅ OpenAI Connected")
 
 except Exception as e:
 
     st.error(f"""
-❌ Gemini API Error
+❌ OpenAI API Error
 
 {e}
 """)
@@ -109,9 +110,9 @@ except Exception as e:
     st.info("""
 Possible Fixes:
 - Invalid API key
-- Free quota exceeded
-- Billing disabled
-- Wrong model
+- Billing issue
+- Quota exceeded
+- Wrong model name
 """)
 
     st.stop()
@@ -324,16 +325,28 @@ QUESTION:
 ANSWER:
 """
 
-                # GEMINI RESPONSE
+                # OPENAI RESPONSE
                 try:
 
-                    with st.spinner("🤖 Gemini Thinking..."):
+                    with st.spinner("🤖 OpenAI Thinking..."):
 
-                        response = llm.generate_content(
-                            prompt
+                        response = client.chat.completions.create(
+                            model="gpt-4.1-mini",
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": "You are a helpful study assistant."
+                                },
+                                {
+                                    "role": "user",
+                                    "content": prompt
+                                }
+                            ],
+                            temperature=0.3,
+                            max_tokens=500
                         )
 
-                    answer = response.text
+                    answer = response.choices[0].message.content
 
                     # OUTPUT
                     st.subheader("📌 Answer")
@@ -364,7 +377,7 @@ ANSWER:
                 except Exception as e:
 
                     st.error(f"""
-❌ Gemini Response Error
+❌ OpenAI Response Error
 
 {e}
 """)
@@ -388,5 +401,5 @@ ANSWER:
 st.markdown("---")
 
 st.caption(
-    "🚀 Built with Streamlit + Gemini + FAISS"
+    "🚀 Built with Streamlit + OpenAI + FAISS"
 )
